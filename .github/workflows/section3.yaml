@@ -1,28 +1,142 @@
-name: "Section 3 - Execution Order & Parallelism"
+# ============================================================
+#  GitHub Actions Mastery — Live Demo Workflow (Beginner Edition)
+#  Each block below is labeled with the course section it shows.
+# ============================================================
 
-on:
-    push:
-        branches:
-            - main
+name: CI
+
+on: # Section 2 — Defining Triggers with on:
+  push:
+    branches: [main]
+#   pull_request:
+#     branches: [main]
+#   schedule: # Section 6 — Scheduling
+#     - cron: "0 2 * * *"
+#   workflow_dispatch: # Section 6 — Manual Runs with Inputs
+#     inputs:
+#       reason:
+#         description: "Why are you running this manually?"
+#         required: true
+#         default: "manual run"
+
+env: # Pipeline-wide variable, available to every job
+  APP_NAME: flask-demo-app
+
+permissions: # Section 5 — GITHUB_TOKEN scoping
+  contents: read
+  pull-requests: write
+  packages: write
+
 jobs:
-    lint:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - run: echo "Linting..."
+  # ------------------------------------------------------------
+  # pre_commit_check — Section 2 bonus (Ruff + pre-commit)
+  # also demonstrates Section 4 — container: jobs
+  # also demonstrates Section 6 — continue-on-error
+  # ------------------------------------------------------------
+  pre_commit_check:
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git
+          pip install pre-commit
 
-    test:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-python@v5
-              with:
-                  python-version: "3.12"
-            - run: pip install -r requirements.txt
-            - run: pytest
+  # ------------------------------------------------------------
+  # run_tests — Section 3 (runs in parallel with pre_commit_check,
+  # since it has no needs:)
+  # ------------------------------------------------------------
+  run_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest --junitxml=report.xml
+      - uses: actions/upload-artifact@v4 # Section 5 — Artifacts (upload)
+        if: always()
+        with:
+          name: test-report
+          path: report.xml
+          retention-days: 5
 
-    build:
-        needs: [lint, test]
-        runs-on: ubuntu-latest
-        steps:
-            - run: echo "Building — only starts after lint AND test both succeed"
+  # ------------------------------------------------------------
+  # build_package — Section 3 (needs:)
+  # ------------------------------------------------------------
+  build_package:
+    needs: [run_tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt --target dist/vendor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-output
+          path: dist/
+          retention-days: 5
+
+  # ------------------------------------------------------------
+  # build_image — Section 5 (GITHUB_TOKEN) / Section 6 (if:)
+  # ------------------------------------------------------------
+#   build_image:
+#     needs: [build_package]
+#     runs-on: ubuntu-latest
+#     if: github.ref == 'refs/heads/main'
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Log in to GitHub Container Registry
+#         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+#       - name: Build and push image
+#         run: |
+#           IMAGE_TAG=ghcr.io/${{ github.repository_owner }}/$APP_NAME:${{ github.sha }}
+#           docker build -t "$IMAGE_TAG" .
+#           docker push "$IMAGE_TAG"
+
+
+  build_image:
+    needs: [build_package]
+    runs-on: ubuntu-latest
+    # if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/flask-demo-app:${{ github.sha }}
+  # ------------------------------------------------------------
+  # deploy — Section 5 (repository secret) / Section 6 (if:)
+  # ------------------------------------------------------------
+  deploy:
+    needs: [build_image]
+    runs-on: ubuntu-latest
+    # if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/download-artifact@v4 # Section 5 — Artifacts (download)
+        with:
+          name: dist-output
+          path: dist/
+      - name: Deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: echo "Deploying $APP_NAME using token starting with ${DEPLOY_TOKEN:0:3}..."
+
+  # ------------------------------------------------------------
+  # nightly_scan — Section 6 (schedule)
+  # ------------------------------------------------------------
+#   nightly_scan:
+#     runs-on: ubuntu-latest
+#     if: github.event_name == 'schedule'
+#     steps:
+#       - run: echo "Running nightly security scan for $APP_NAME"
