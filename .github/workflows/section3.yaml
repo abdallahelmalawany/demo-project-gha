@@ -8,16 +8,16 @@ name: CI
 on: # Section 2 — Defining Triggers with on:
   push:
     branches: [main]
-#   pull_request:
-#     branches: [main]
-#   schedule: # Section 6 — Scheduling
-#     - cron: "0 2 * * *"
-#   workflow_dispatch: # Section 6 — Manual Runs with Inputs
-#     inputs:
-#       reason:
-#         description: "Why are you running this manually?"
-#         required: true
-#         default: "manual run"
+  pull_request:
+    branches: [main]
+  schedule: # Section 6 — Scheduling
+    - cron: "0 2 * * *"
+  workflow_dispatch: # Section 6 — Manual Runs with Inputs
+    inputs:
+      reason:
+        description: "Why are you running this manually?"
+        required: true
+        default: "manual run"
 
 env: # Pipeline-wide variable, available to every job
   APP_NAME: flask-demo-app
@@ -103,7 +103,7 @@ jobs:
   build_image:
     needs: [build_package]
     runs-on: ubuntu-latest
-    # if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -121,7 +121,7 @@ jobs:
   deploy:
     needs: [build_image]
     runs-on: ubuntu-latest
-    # if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/download-artifact@v4 # Section 5 — Artifacts (download)
         with:
@@ -135,8 +135,8 @@ jobs:
   # ------------------------------------------------------------
   # nightly_scan — Section 6 (schedule)
   # ------------------------------------------------------------
-#   nightly_scan:
-#     runs-on: ubuntu-latest
-#     if: github.event_name == 'schedule'
-#     steps:
-#       - run: echo "Running nightly security scan for $APP_NAME"
+  nightly_scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - run: echo "Running nightly security scan for $APP_NAME"
